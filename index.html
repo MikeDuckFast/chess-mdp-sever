@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chess Game</title>
+  <link rel="stylesheet" href="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css" />
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f3e8ff;
+      color: #4b0082;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    #board {
+      width: 400px;
+      margin: 20px;
+    }
+    .controls {
+      margin-top: 10px;
+    }
+    button {
+      background-color: #c084fc;
+      color: white;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      margin: 0 5px;
+    }
+    button:hover {
+      background-color: #a855f7;
+    }
+  </style>
+</head>
+<body>
+  <h1>Chess Game</h1>
+  <div id="board"></div>
+  <div class="controls">
+    <button onclick="playAI()">Chơi với máy</button>
+    <button onclick="createGameLink()">Tạo link mời bạn</button>
+    <button onclick="resetGame()">Reset</button>
+  </div>
+  <p id="game-link" style="margin-top: 10px;"></p>
+
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.2/dist/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.13.4/chess.min.js"></script>
+  <script src="https://unpkg.com/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mliebelt/pgn-parser@1.3.0/dist/pgn-parser.min.js"></script>
+
+  <script>
+    const socket = io("https://chess-mdp-sever.onrender.com");
+    const urlParams = new URLSearchParams(window.location.search);
+    const gameId = urlParams.get("game");
+    const game = new Chess();
+    let board = null;
+    let playAIEnabled = false;
+    let isMultiplayer = !!gameId;
+    let playerColor = 'w';
+
+    function onDragStart(source, piece) {
+      if (game.game_over() ||
+         (playAIEnabled && piece.search(/^b/) !== -1) ||
+         (isMultiplayer && piece[0] !== playerColor)) {
+        return false;
+      }
+    }
+
+    function onDrop(source, target) {
+      const move = game.move({ from: source, to: target, promotion: 'q' });
+      if (move === null) return 'snapback';
+      updateBoard();
+      if (isMultiplayer) {
+        socket.emit("move", { gameId, move });
+      } else if (playAIEnabled && !game.game_over()) {
+        setTimeout(makeAIMove, 250);
+      }
+    }
+
+    function makeAIMove() {
+      fetch("https://stockfish.online/api/s/v2.php", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fen: game.fen(),
+          depth: 12
+        })
+      })
+      .then(res => res.json())
+      .then(data => {
+        game.move(data.bestmove, { sloppy: true });
+        updateBoard();
+      });
+    }
+
+    function updateBoard() {
+      board.position(game.fen());
+    }
+
+    function playAI() {
+      playAIEnabled = true;
+      isMultiplayer = false;
+      resetGame();
+    }
+
+    function resetGame() {
+      game.reset();
+      updateBoard();
+    }
+
+    function createGameLink() {
+      const baseUrl = window.location.href.split('?')[0];
+      const newGameId = Math.random().toString(36).substring(2, 10);
+      const link = `${baseUrl}?game=${newGameId}`;
+      document.getElementById('game-link').innerText = `Link mời: ${link}`;
+      navigator.clipboard.writeText(link).then(() => {
+        alert('Link đã được copy!');
+      });
+    }
+
+    if (isMultiplayer) {
+      socket.emit("join", gameId);
+      socket.on("move", (data) => {
+        game.move(data.move);
+        updateBoard();
+      });
+      socket.on("color", color => {
+        playerColor = color;
+      });
+    }
+
+    board = Chessboard('board', {
+      draggable: true,
+      position: 'start',
+      onDragStart: onDragStart,
+      onDrop: onDrop
+    });
+  </script>
+</body>
+</html>
